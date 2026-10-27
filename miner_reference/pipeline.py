@@ -208,6 +208,7 @@ def candidate(
                 ),
             }
         )
+    planned = _plan(model, content, INSTRUCTIONS, MAX_OUTPUT)
     try:
         result = calls.create(
             request_id=position,
@@ -222,10 +223,10 @@ def candidate(
     except (WitnessError, APIError) as error:
         provider_failed(error)
         if budget is not None:
-            budget.charge(model, None)
+            budget.charge(model, None, planned)
         return None
     if budget is not None:
-        budget.charge(model, result.usage)
+        budget.charge(model, result.usage, planned)
     if result.status != "completed":
         return None
     source = result.output_text.strip()
@@ -248,10 +249,13 @@ def render_candidates(
     pool: ThreadPoolExecutor,
     repair_seeds: Iterable[int],
     budget: Budget | None = None,
+    reserved: list[Planned] | None = None,
 ) -> list[Candidate]:
     # 1. Wait for every candidate first (submission order), so all usage charges of the
     #    stage are recorded before any budget decision; nothing is in flight afterwards.
     sources = [future.result() for future in futures]
+    if budget is not None and reserved:
+        budget.release(reserved)
     candidates = []
     repairs = []
     # 2. Render in fixed order; decide each repair sequentially in this thread, so the
@@ -379,10 +383,10 @@ def choose(
     except (WitnessError, APIError) as error:
         provider_failed(error)
         if budget is not None:
-            budget.charge(SOL, None)
+            budget.charge(SOL, None, planned)
         return None
     if budget is not None:
-        budget.charge(SOL, result.usage)
+        budget.charge(SOL, result.usage, planned)
     if result.status != "completed":
         return None
     try:
@@ -398,12 +402,17 @@ def run(image: bytes, seed: int, calls: ModelCalls, renderer: Renderer) -> str |
     # Credits that must stay free for the final selection (its worst case is small).
     final_keep = Planned(SOL, len(JUDGE_INSTRUCTIONS) + 200, 4, JUDGE_OUTPUT).worst_credits()
     with ThreadPoolExecutor(max_workers=3, thread_name_prefix="miner-candidate") as pool:
+        initial_plans = [candidate_plan(model, 1, len(STRATEGIES[position])) for position, model in ((1, ASTRA), (2, SOL), (3, SOL))]
+        if not budget.affordable(initial_plans, keep=final_keep):
+            return None
+        budget.reserve(initial_plans)
         initial = [
             pool.submit(candidate, image, calls, model, position, budget=budget, strategy=STRATEGIES[position])
             for position, model in ((1, ASTRA), (2, SOL), (3, SOL))
         ]
         candidates = render_candidates(
-            initial, renderer, image=image, calls=calls, pool=pool, repair_seeds=(8, 9, 10), budget=budget
+            initial, renderer, image=image, calls=calls, pool=pool, repair_seeds=(8, 9, 10), budget=budget,
+            reserved=initial_plans,
         )
         if not candidates:
             return None
@@ -425,9 +434,9 @@ def run(image: bytes, seed: int, calls: ModelCalls, renderer: Renderer) -> str |
             for position in (5, 6)
         ]
         candidates = render_candidates(
-            refinements, renderer, image=image, calls=calls, pool=pool, repair_seeds=(11, 12), budget=budget
+            refinements, renderer, image=image, calls=calls, pool=pool, repair_seeds=(11, 12), budget=budget,
+            reserved=[refine_plan, refine_plan],
         )
-        budget.release([refine_plan, refine_plan])
         if not candidates:
             return winner.source
         selected = choose(image, seed, calls, [winner, *candidates], 7, budget=budget)

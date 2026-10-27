@@ -10,16 +10,20 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from .config import LIBRARY_MODE
+
 _DIR = Path(__file__).with_name("library")
 
 
-def _load() -> str:
-    if not _DIR.is_dir():
+def _load(mode: str = LIBRARY_MODE) -> str:
+    if mode == "off" or not _DIR.is_dir():
         return ""
     parts: list[str] = []
     patterns = _DIR / "patterns.md"
     if patterns.is_file():
         parts.append("## Procedural patterns (allowlisted APIs only)\n\n" + patterns.read_text().strip())
+    if mode == "compact":
+        return "\n\n".join(parts)
     index = _DIR / "index.json"
     names: list[str]
     if index.is_file():

@@ -65,11 +65,17 @@ class Budget:
         self.reserved = Decimal(0)
         self.lock = threading.Lock()
 
-    def charge(self, model: str, usage: object) -> None:
-        """Record verified usage of a completed call (or a dispatched failure)."""
+    def charge(self, model: str, usage: object, planned: Planned | None = None) -> None:
+        """Record usage of a dispatched call.
+
+        ``usage`` is the provider-reported usage object. When it is missing (HTTP
+        failure, incomplete delivery) the call is charged at its planned worst case:
+        unknown usage is never treated as zero.
+        """
         with self.lock:
             self.calls += 1
             if usage is None:
+                self.spent += planned.worst_credits() if planned is not None else Decimal(0)
                 return
             inp = int(getattr(usage, "input_tokens", 0) or 0)
             out = int(getattr(usage, "output_tokens", 0) or 0)
