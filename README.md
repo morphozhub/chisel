@@ -1,4 +1,4 @@
-# SN17 Competition 3 miner (closed-source model phase)
+# Chisel — SN17 Competition 3 miner (closed-source model phase)
 
 Entry point: `main.py` → `generate(image, seed, witness, renderer)`.
 Based on the organizer's `miner-reference` (404-Repo/404-gen-subnet, branch
