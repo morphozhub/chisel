@@ -1,0 +1,30 @@
+[
+  {
+    "file": "vessel_copper_teapot.js",
+    "category": "lathe vessel with handle",
+    "description": "Brushed-copper teapot: hollow LatheGeometry body (SplineCurve-smoothed belly, flared rim, inner wall), foot ring, domed lid as a second lathe with stalk and knob, curved spout as TubeGeometry on a CatmullRomCurve3 with torus lip, arched handle tube with ferrule spheres at both ends. Groups: body, lid, spout, handle.",
+    "bytes": 4516,
+    "validated": true
+  },
+  {
+    "file": "furniture_upholstered_stool.js",
+    "category": "furniture (legs and frame)",
+    "description": "Square upholstered stool: rounded cushion from a rounded-rect Shape extruded with bevel, four tapered splayed legs (geometry translated so the pivot is at the top, group tilted), brass foot caps, apron and foot-stretcher rings from a shared box. Groups: seat, legs, rails.",
+    "bytes": 4086,
+    "validated": true
+  },
+  {
+    "file": "tool_chef_knife.js",
+    "category": "hand tool / elongated object",
+    "description": "Chef's knife along Z (tip forward): blade outline drawn as a Shape (straight spine, dropped tip, curved belly) extruded 4 mm with bevel and rotated so length runs along +Z; lathe-turned oval green grip extending to -Z, steel bolster, dark butt cap, three shared-geometry rivets. Groups: blade, handle.",
+    "bytes": 4011,
+    "validated": true
+  },
+  {
+    "file": "fruit_apple.js",
+    "category": "organic / fruit form",
+    "description": "Yellow-green apple: LatheGeometry profile with top and bottom dimples, subtle 5-lobe ribbing by deterministic vertex displacement, 64x64 DataTexture skin (red blush on one side, lenticel specks), curved tube stem and a ShapeGeometry leaf. Parts: body, stem, leaf.",
+    "bytes": 4006,
+    "validated": true
+  }
+]
