@@ -235,7 +235,8 @@ def test_five_candidates_refine_the_same_first_winner() -> None:
     source = run(PNG, 42, calls, renderer)
     assert source in renderer.sources and len(renderer.sources) == 5
     requests = dict(calls.requests)
-    assert [requests[i]["model"] for i in range(1, 8)] == ["gpt-6-astra"] + ["gpt-6.1-sol"] * 6
+    from miner_reference import config as _cfg
+    assert [requests[i]["model"] for i in range(1, 8)] == ["gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-sol", "gpt-6.1-sol", _cfg.REFINE_MODEL, _cfg.REFINE_MODEL, "gpt-6.1-sol"]
     assert len({seed for seed, _ in calls.requests}) == 7
     refinements = [json.loads(serialize_body({**requests[i], "stream": True}, "api"))["input"][0]["content"] for i in (5, 6)]
     assert refinements[0] == refinements[1]
