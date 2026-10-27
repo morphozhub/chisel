@@ -87,7 +87,7 @@ def http_error(cls, code):
 
 
 def choice(label: str) -> Response:
-    return response(json.dumps({"winner": label, "reason": "r", "improvements": "i"}))
+    return response(json.dumps({"winner": label, "reason": "r", "discrepancies": [{"part": "body", "issue": "too tall", "fix": "scale y 0.8"}], "improvements": "i"}))
 
 
 def test_happy_path_is_deterministic():
