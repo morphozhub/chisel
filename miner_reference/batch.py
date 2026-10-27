@@ -74,6 +74,36 @@ class BatchSettings:
             raise ValueError("Expected a uint64 generation seed")
 
 
+class Pacer:
+    """Process-wide dispatch pacing: at most ``limit`` dispatches per ``window`` seconds.
+
+    Lives outside generate(); it only delays when a request is sent, never what is sent,
+    so recordings and replay are unaffected. Used to stay under a subscription quota
+    (a provider 429 is retained by the witness and would void the prompt).
+    """
+
+    def __init__(self, limit: int | None, window: float = 18000.0) -> None:
+        self.limit, self.window = limit, window
+        self.times: list[float] = []
+        self.lock = threading.Lock()
+
+    def acquire(self) -> None:
+        if not self.limit:
+            return
+        while True:
+            with self.lock:
+                now = time.monotonic()
+                self.times = [t for t in self.times if now - t < self.window]
+                if len(self.times) < self.limit:
+                    self.times.append(now)
+                    return
+                wait = self.times[0] + self.window - now
+            time.sleep(min(max(wait, 1.0), 60.0))
+
+
+PACER = Pacer(None)
+
+
 class LimitedCalls:
     def __init__(
         self,
@@ -85,6 +115,7 @@ class LimitedCalls:
         directory.mkdir(mode=0o700, exist_ok=True)
 
     def create(self, *, request_id: int = 0, **params: Unpack[ResponseCreateParamsBase]) -> Response:
+        PACER.acquire()
         self.progress(f"call {request_id} {params.get('model')}: running")
         try:
             result = self.calls.create(request_id=request_id, **params)
@@ -251,6 +282,8 @@ def main() -> None:
     parser.add_argument("--wallet-hotkey", default="default")
     parser.add_argument("--wallet-path", default="~/.bittensor/wallets")
     parser.add_argument("--api", action="store_true", help="Use OPENAI_API_KEY instead of a local Codex subscription")
+    parser.add_argument("--max-calls-per-5h", type=int, default=None,
+                        help="Pace model dispatches to at most N per 5 hours (subscription quota guard)")
     parser.add_argument("--no-final-save", action="store_true",
                         help="DEV ONLY: skip the Pod final-save (test deployments report artifact_storage_disabled)")
     args = parser.parse_args()
@@ -276,6 +309,8 @@ def main() -> None:
         args.parallel_renders,
         final_save=not args.no_final_save,
     )
+    global PACER
+    PACER = Pacer(args.max_calls_per_5h)
     if args.action == "check":
         print(
             json.dumps(
