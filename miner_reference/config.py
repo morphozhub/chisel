@@ -21,3 +21,6 @@ REFINE_MODEL = "gpt-6-astra"
 
 # Fourth initial candidate (gpt-6.1-sol, "silhouette-first" strategy, request id 15, repair id 16).
 FOURTH_CANDIDATE = False
+
+# Models for the three initial candidates (strategies 1, 2, 3). Ablation: all-Astra.
+CANDIDATE_MODELS = ("gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-sol")

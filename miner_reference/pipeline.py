@@ -475,7 +475,7 @@ def run(image: bytes, seed: int, calls: ModelCalls, renderer: Renderer) -> str |
     # Credits that must stay free for the final selection (its worst case is small).
     final_keep = Planned(SOL, len(JUDGE_INSTRUCTIONS) + 200, 4, JUDGE_OUTPUT).worst_credits()
     with ThreadPoolExecutor(max_workers=4, thread_name_prefix="miner-candidate") as pool:
-        slots = [(1, ASTRA), (2, SOL), (3, SOL)] + ([(15, SOL)] if config.FOURTH_CANDIDATE else [])
+        slots = list(zip((1, 2, 3), config.CANDIDATE_MODELS, strict=True)) + ([(15, SOL)] if config.FOURTH_CANDIDATE else [])
         repair_ids = (8, 9, 10) + ((16,) if config.FOURTH_CANDIDATE else ())
         initial_plans = [candidate_plan(model, 1, len(STRATEGIES[position])) for position, model in slots]
         if not budget.affordable(initial_plans, keep=final_keep):
