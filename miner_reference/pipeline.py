@@ -47,7 +47,10 @@ ANALYSIS = (
     "keep the back, sides and top plausible, and reuse geometries/materials. HARD LIMIT: at most 200 "
     "draw calls (every Mesh, Line, LineSegments or Points object counts as one); aim for under 120. "
     "Repeated elements (buttons, rivets, slats, spokes, keys, bristles) must use one InstancedMesh or "
-    "be merged into few meshes, never hundreds of separate objects. Finish with the "
+    "be merged into few meshes, never hundreds of separate objects. Keep the whole model under "
+    "~100k vertices and finish generate() in well under 1 s: use modest segment counts (<=48 "
+    "radial / <=32 height segments, lathe/extrude steps <=64), no huge nested loops, no "
+    "per-vertex JavaScript work on large geometries. Finish with the "
     "fit-to-unit-cube normalisation. Output only the JavaScript module.\n\n"
 )
 
