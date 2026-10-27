@@ -58,13 +58,14 @@ def test_pipeline_skips_refinements_when_budget_cannot_cover_them(monkeypatch):
     limit = int(astra.worst_credits() + 2 * sol.worst_credits() + 2 * judge.worst_credits()) + 1
     monkeypatch.setattr(pipeline, "Budget", lambda: Budget(credits_limit=limit, calls_limit=60, safety_credits=0))
 
-    def heavy(r):  # actual usage close to the worst case: max output tokens really consumed
-        r.usage.output_tokens = pipeline.MAX_OUTPUT
+    def heavy(r, model):  # actual usage close to the worst case: the model's max output really consumed
+        r.usage.output_tokens = pipeline.max_output(model)
         r.usage.input_tokens = 14000
         r.usage.total_tokens = r.usage.input_tokens + r.usage.output_tokens
         return r
 
-    plan = {1: heavy(response(JS + "//a")), 2: heavy(response(JS + "//b")), 3: heavy(response(JS + "//c")), 4: choice("A")}
+    plan = {1: heavy(response(JS + "//a"), pipeline.ASTRA), 2: heavy(response(JS + "//b"), pipeline.SOL),
+            3: heavy(response(JS + "//c"), pipeline.SOL), 4: choice("A")}
     calls = StubCalls(plan)
     out = pipeline.run(IMAGE, SEED, calls, StubRenderer())
     assert out in {pipeline.normalize(JS + s) for s in ("//a", "//b", "//c")}
@@ -86,6 +87,6 @@ def test_worst_case_of_full_path_is_bounded_by_the_guard():
     refine = pipeline.candidate_plan(pipeline.SOL, 2, 8000)
     happy = astra.worst_credits() + 2 * sol.worst_credits() + 2 * judge.worst_credits() + 2 * refine.worst_credits()
     assert happy < Budget().credits_limit  # happy path always fits
-    assert happy + 5 * pipeline.candidate_plan(pipeline.SOL, 1, 9000).worst_credits() > Budget().credits_limit
-    # => repairs are the stage the guard may skip; print for the record
-    print(json.dumps({"happy_worst": int(happy), "limit": int(Budget().credits_limit)}))
+    worst_full = happy + 5 * pipeline.candidate_plan(pipeline.SOL, 1, 9000).worst_credits()
+    assert worst_full <= 5_000_000  # with the Astra cap even the maximal repair path stays nominal
+    print(json.dumps({"happy_worst": int(happy), "max_path_worst": int(worst_full), "limit": int(Budget().credits_limit)}))
