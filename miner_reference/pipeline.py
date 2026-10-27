@@ -43,7 +43,10 @@ ANALYSIS = (
     "must face +Z, Y up); colour zones and materials. Then build the geometry part by part in "
     "named sub-groups, largest and most characteristic parts first, matching the silhouette and "
     "proportions before any small detail. Prefer real 3D volume for every part (no flat billboards), "
-    "keep the back, sides and top plausible, and reuse geometries/materials. Finish with the "
+    "keep the back, sides and top plausible, and reuse geometries/materials. HARD LIMIT: at most 200 "
+    "draw calls (every Mesh, Line, LineSegments or Points object counts as one); aim for under 120. "
+    "Repeated elements (buttons, rivets, slats, spokes, keys, bristles) must use one InstancedMesh or "
+    "be merged into few meshes, never hundreds of separate objects. Finish with the "
     "fit-to-unit-cube normalisation. Output only the JavaScript module.\n\n"
 )
 
