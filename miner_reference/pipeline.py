@@ -29,7 +29,7 @@ from pydantic import BaseModel, ConfigDict
 from renderer_client import Renderer, RenderOptions, RenderRejected
 from witness_client import WitnessError
 
-from . import config
+from . import complexity, config
 from .budget import Budget, Planned
 from .images import png_data_url
 from .fewshot import LIBRARY
@@ -317,6 +317,9 @@ def render_candidates(
 
 
 def _rendered(source: str, renderer: Renderer) -> Candidate:
+    heavy = complexity.assess(source)  # pure function of the source: no render call, replay-safe
+    if heavy is not None:
+        raise RenderRejected(complexity.rejection_json(heavy))
     grid = renderer.render(source, GRID)  # may raise RenderRejected (recorded outcome)
     views = None
     if config.EXTRA_VIEWS:

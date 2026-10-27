@@ -14,10 +14,10 @@ EXTRA_VIEWS = True
 # Self-consistent selection: run the judge twice with the candidate labels in reversed
 # order (request ids 13 / 14). Agreement wins; disagreement keeps the incumbent
 # (round 1: the first candidate). Costs +2 model calls per prompt.
-JUDGE_SWAP = False
+JUDGE_SWAP = True
 
 # Model used for the two refinements (experiment: gpt-6-astra vs gpt-6.1-sol).
 REFINE_MODEL = "gpt-6-astra"
 
 # Fourth initial candidate (gpt-6.1-sol, "silhouette-first" strategy, request id 15, repair id 16).
-FOURTH_CANDIDATE = False
+FOURTH_CANDIDATE = True
