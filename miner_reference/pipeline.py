@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, Unpack, cast
 
-from openai import APIError, APIStatusError
+from openai import APIConnectionError, APIError, APIStatusError
 from openai.types.responses import Response, ResponseInputParam
 from openai.types.responses.response_create_params import ResponseCreateParamsBase
 from pydantic import BaseModel, ConfigDict
@@ -144,6 +144,8 @@ def provider_failed(error: BaseException) -> bool:
         if error.status_code in _TRANSIENT_STATUSES:
             raise ProviderUnavailable(f"witness provider failure {error.status_code}: {error}") from error
         return True
+    if isinstance(error, APIConnectionError):
+        raise error  # transport failure: infrastructure, never a candidate outcome (upstream bed1ae8)
     if isinstance(error, APIStatusError):
         if error.status_code in _TRANSIENT_STATUSES:
             raise ProviderUnavailable(f"provider HTTP {error.status_code}: {error}") from error

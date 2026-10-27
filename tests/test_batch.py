@@ -1,4 +1,4 @@
-"""Fixtures and batch tests, adapted from the organizer's miner-reference/tests/test_batch.py.
+"""Fixtures and batch tests, adapted from the organizer's miner-reference/tests/test_batch.py (bed1ae8).
 
 Fixture names (PNG, Calls, Renderer, Witness) are kept so test_replay.py reads like upstream.
 Additions over upstream: a shared ``Calls`` instance on ``Witness`` (``witness.calls``), per-request
@@ -17,11 +17,12 @@ import uuid
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Unpack, cast
+from typing import Any, Unpack, cast
 
 import httpx
 import pytest
 from bittensor_wallet import Keypair
+from openai import APIConnectionError, APIError, APITimeoutError
 from openai.types.responses import Response
 from openai.types.responses.response_create_params import ResponseCreateParamsBase
 from renderer_client import RenderOptions, RenderRejected, RenderUnavailable
@@ -105,7 +106,7 @@ class Calls:
         self.invalid_choice = False
         self.invalid: set[int] = set()  # selector request_ids that answer with non-JSON
         self.incomplete: set[int] = set()  # request_ids that answer with status "incomplete"
-        self.failure: WitnessError | None = None
+        self.failure: WitnessError | APIError | None = None
 
     def create(self, *, request_id: int = 0, **params: Unpack[ResponseCreateParamsBase]) -> Response:
         self.requests.append((request_id, params))
@@ -134,10 +135,10 @@ class Witness(WitnessClient):
     def __init__(self) -> None:
         self._state = Path(tempfile.mkdtemp(prefix="miner-witness-"))
         self._mode = "api"
-        self._config = {"round": "test-0", "witness_url": "https://witness.test", "proof_parameters": "unused"}
+        self._config = {"witness_url": "https://witness.test", "proof_parameters": "unused"}
         self._http = cast(httpx.Client, SimpleNamespace(base_url="https://witness.test"))
         self._hotkey = cast(Keypair, SimpleNamespace(ss58_address="hotkey"))
-        self._gateway = cast(PodGatewayClient, SimpleNamespace(delivery_timeout=5))
+        self._gateway = cast(PodGatewayClient, SimpleNamespace(delivery_timeout=5, round_number="test-0", ensure_pod=lambda: "fixture"))
         self._calls_lock = threading.Lock()
         self._calls = {}
         self.responses = self  # the real WitnessClient.__init__ sets this; upstream's fixture does not
@@ -147,9 +148,27 @@ class Witness(WitnessClient):
         self.active = self.peak = self.paid = 0
         self.first_pair: threading.Barrier | None = None
         self.lose_reply_once = False
+        self.submissions: dict[str, str | None] = {}
         self.calls = Calls()
         # request_id -> HTTP status returned once through the capture boundary (never cached)
         self.provider_status: dict[int, int] = {}
+
+    def renderer_transport(self) -> httpx.BaseTransport:
+        def submit(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/v1/artifacts/context":
+                return httpx.Response(200, json={"submission_commit": "c" * 40})
+            value = json.loads(request.content)
+            source = value["source"]
+            with self.lock:
+                self.submissions[value["generation"]["prompt_sha256"]] = source
+            return httpx.Response(200, json={"submission": {
+                "js": None if source is None else "saved.js",
+                "views": None if source is None else "saved",
+                "failure_reason": "generation_failed" if source is None else None,
+                "size": 0 if source is None else len(source.encode()),
+            }})
+
+        return httpx.MockTransport(submit)
 
     def _capture(self, key: RequestKey, body: bytes, session_id: str | None) -> CapturedResponse:
         with self.lock:
@@ -295,11 +314,22 @@ def test_invalid_selection_does_not_trigger_a_repair() -> None:
     assert len(malformed.requests) == 1
 
 
-def test_infrastructure_failures_propagate_instead_of_changing_the_algorithm() -> None:
+@pytest.mark.parametrize("selecting", [False, True])
+@pytest.mark.parametrize("failure", [
+    WitnessError("Gateway unavailable", source="gateway"),
+    APIConnectionError(request=cast(Any, httpx.Request("POST", "https://api.openai.com/v1/responses"))),
+    APITimeoutError(request=cast(Any, httpx.Request("POST", "https://api.openai.com/v1/responses"))),
+])
+def test_infrastructure_failures_propagate_instead_of_changing_the_algorithm(
+    selecting: bool, failure: WitnessError | APIError,
+) -> None:
     calls = Calls()
-    calls.failure = WitnessError("Gateway unavailable", source="gateway")
-    with pytest.raises(WitnessError):
-        run(PNG, 42, calls, Renderer())
+    calls.failure = failure
+    with pytest.raises(type(failure)):
+        if selecting:
+            choose(PNG, 42, calls, [Candidate("source", PNG)], 4)
+        else:
+            run(PNG, 42, calls, Renderer())
 
 
 def test_batch_runs_prompts_in_parallel_with_a_shared_call_limit(tmp_path: Path, prompts: list[Prompt]) -> None:
@@ -312,6 +342,8 @@ def test_batch_runs_prompts_in_parallel_with_a_shared_call_limit(tmp_path: Path,
     assert witness.peak == 2 and witness.paid == 28
     assert len(list(witness._state.glob("executions/*/*/execution.json"))) == 4 and len(renderer.sources) == 20
     assert len(list(config.output.glob("*/selected.js"))) == 4
+    # Final saves went through the Pod artifact route once per prompt, carrying the selected bytes.
+    assert witness.submissions == {p.sha256: (config.output / p.id / "selected.js").read_text() for p in prompts}
     assert run_batch(prompts, config, witness, renderer, progress=lambda _: None) == {
         str(i): "selected" for i in range(4)
     }
@@ -326,7 +358,7 @@ def test_render_outage_does_not_block_other_prompts_or_repeat_paid_results(
     config = settings(tmp_path, parallel_prompts=1)
     first = run_batch(prompts[:2], config, witness, renderer, progress=lambda _: None)
     assert first == {"0": "pending", "1": "selected"}
-    assert witness.paid == 10
+    assert witness.paid == 10 and set(witness.submissions) == {prompts[1].sha256}
     second = run_batch(prompts[:2], config, witness, renderer, progress=lambda _: None)
     assert second == {"0": "selected", "1": "selected"}
     assert witness.paid == 14
@@ -398,7 +430,7 @@ def test_check_command_validates_frozen_inputs_without_loading_credentials(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     config = tmp_path / "witness.json"
-    config.write_text(json.dumps({"round": "test-0"}))
+    config.write_text(json.dumps({"witness_url": "https://witness.test", "proof_parameters": "unused"}))
     manifest = tmp_path / "manifest.json"
     manifest.write_text(
         json.dumps(
@@ -419,8 +451,6 @@ def test_check_command_validates_frozen_inputs_without_loading_credentials(
             str(config),
             "--output",
             str(tmp_path / "run"),
-            "--renderer-url",
-            "http://localhost:18040",
             "--renderer-id",
             "fixture",
         ],
