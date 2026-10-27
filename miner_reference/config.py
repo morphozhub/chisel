@@ -17,4 +17,4 @@ EXTRA_VIEWS = True
 JUDGE_SWAP = False
 
 # Model used for the two refinements (experiment: gpt-6-astra vs gpt-6.1-sol).
-REFINE_MODEL = "gpt-6-astra"
+REFINE_MODEL = "gpt-6.1-sol"
