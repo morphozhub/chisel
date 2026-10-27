@@ -58,7 +58,7 @@ export default function generate(THREE) {
   return root;
 }
 
-// Skin texture: yellow-green base, red blush on one side (u), sparse lenticel specks. No Math.random.
+// Skin texture: yellow-green base, red blush on one side (u), sparse lenticel specks. Deterministic hash only.
 function appleSkin(THREE, n) {
   const data = new Uint8Array(n * n * 4);
   for (let y = 0; y < n; y++) {

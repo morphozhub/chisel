@@ -78,7 +78,7 @@ for (let i = 0; i < n; i++) {
 function tex(THREE, n) {
   const data = new Uint8Array(n * n * 4);
   for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
-    const h = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453, f = h - Math.floor(h); // hash, not Math.random
+    const h = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453, f = h - Math.floor(h); // deterministic hash
     const v = f > 0.93 ? 150 : 235, i = (y * n + x) * 4; data[i] = data[i + 1] = data[i + 2] = v; data[i + 3] = 255;
   }
   const t = new THREE.DataTexture(data, n, n); t.colorSpace = THREE.SRGBColorSpace; t.needsUpdate = true; return t;
