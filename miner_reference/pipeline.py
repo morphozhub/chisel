@@ -87,6 +87,13 @@ STRATEGIES = {
         "table. Favour correct relative sizes and positions over surface detail; use InstancedMesh "
         "for repeated elements."
     ),
+    15: (
+        "Strategy: silhouette first. Start from the outline the object would cast from the front, "
+        "the side and the top, and build the smallest set of volumes that reproduces all three "
+        "outlines (lathe for round bodies, extruded shapes for flat profiles, boxes/cylinders for the "
+        "rest). Only then add secondary parts and colour. The silhouette must read correctly from "
+        "every view before any detail."
+    ),
 }
 
 
@@ -464,17 +471,19 @@ def run(image: bytes, seed: int, calls: ModelCalls, renderer: Renderer) -> str |
     budget = Budget()
     # Credits that must stay free for the final selection (its worst case is small).
     final_keep = Planned(SOL, len(JUDGE_INSTRUCTIONS) + 200, 4, JUDGE_OUTPUT).worst_credits()
-    with ThreadPoolExecutor(max_workers=3, thread_name_prefix="miner-candidate") as pool:
-        initial_plans = [candidate_plan(model, 1, len(STRATEGIES[position])) for position, model in ((1, ASTRA), (2, SOL), (3, SOL))]
+    with ThreadPoolExecutor(max_workers=4, thread_name_prefix="miner-candidate") as pool:
+        slots = [(1, ASTRA), (2, SOL), (3, SOL)] + ([(15, SOL)] if config.FOURTH_CANDIDATE else [])
+        repair_ids = (8, 9, 10) + ((16,) if config.FOURTH_CANDIDATE else ())
+        initial_plans = [candidate_plan(model, 1, len(STRATEGIES[position])) for position, model in slots]
         if not budget.affordable(initial_plans, keep=final_keep):
             return None
         budget.reserve(initial_plans)
         initial = [
             pool.submit(candidate, image, calls, model, position, budget=budget, strategy=STRATEGIES[position])
-            for position, model in ((1, ASTRA), (2, SOL), (3, SOL))
+            for position, model in slots
         ]
         candidates = render_candidates(
-            initial, renderer, image=image, calls=calls, pool=pool, repair_seeds=(8, 9, 10), budget=budget,
+            initial, renderer, image=image, calls=calls, pool=pool, repair_seeds=repair_ids, budget=budget,
             reserved=initial_plans,
         )
         if not candidates:

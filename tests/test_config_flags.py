@@ -73,3 +73,23 @@ def test_judge_swap_disagreement_keeps_incumbent(monkeypatch):
     # Round 1 disagreement -> incumbent = candidates[0] (Astra); the refinements still run on it,
     # final disagreement -> keep the round-1 winner (incumbent) => output is the Astra source.
     assert out == pipeline.normalize(JS + "//a")
+
+
+def test_fourth_candidate_uses_ids_15_and_16(monkeypatch):
+    monkeypatch.setattr(config, "FOURTH_CANDIDATE", True)
+    plan = plan_happy()
+    plan[15] = response(JS + "//f")
+    calls = StubCalls(plan)
+    out = pipeline.run(IMAGE, SEED, calls, StubRenderer())
+    assert out is not None
+    assert sorted(r for r, _ in calls.log) == [1, 2, 3, 4, 5, 6, 7, 15]
+
+
+def test_fourth_candidate_repair_uses_id_16(monkeypatch):
+    monkeypatch.setattr(config, "FOURTH_CANDIDATE", True)
+    plan = plan_happy()
+    plan[15] = response(JS + "//bad4")
+    plan[16] = response(JS + "//fixed4")
+    calls = StubCalls(plan)
+    out = pipeline.run(IMAGE, SEED, calls, StubRenderer(reject={"//bad4"}))
+    assert out is not None and (16, pipeline.SOL) in calls.log

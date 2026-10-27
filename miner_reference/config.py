@@ -18,3 +18,6 @@ JUDGE_SWAP = False
 
 # Model used for the two refinements (experiment: gpt-6-astra vs gpt-6.1-sol).
 REFINE_MODEL = "gpt-6-astra"
+
+# Fourth initial candidate (gpt-6.1-sol, "silhouette-first" strategy, request id 15, repair id 16).
+FOURTH_CANDIDATE = False

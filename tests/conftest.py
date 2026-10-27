@@ -15,3 +15,4 @@ def _upstream_profile(monkeypatch: pytest.MonkeyPatch) -> None:
     # and the swapped double judge are exercised by tests/test_config_flags.py explicitly.
     monkeypatch.setattr(config, "EXTRA_VIEWS", False)
     monkeypatch.setattr(config, "JUDGE_SWAP", False)
+    monkeypatch.setattr(config, "FOURTH_CANDIDATE", False)
