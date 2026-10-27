@@ -59,7 +59,7 @@ INSTRUCTIONS = (
 
 GRID = RenderOptions(lighting="neutral")
 # Side, back and top views on white: what the organizer judge looks at beyond the front.
-VIEWS = RenderOptions(thetas=(90.0, 180.0, 0.0), phis=(0.0, 0.0, 60.0), bg_color="ffffff", lighting="neutral")
+VIEWS = RenderOptions(thetas=(90.0, 180.0, 0.0), phis=(0.0, 0.0, -60.0), bg_color="ffffff", lighting="neutral")  # negative phi = camera above
 SOL = "gpt-6.1-sol"
 ASTRA = "gpt-6-astra"
 NORMALIZATION = Path(__file__).with_name("normalize.js").read_text()
