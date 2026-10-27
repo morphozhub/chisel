@@ -67,6 +67,13 @@ SOL = "gpt-6.1-sol"
 ASTRA = "gpt-6-astra"
 NORMALIZATION = Path(__file__).with_name("normalize.js").read_text()
 MAX_OUTPUT = 32768
+# Astra output is capped lower: observed 2.5–4.5k tokens, and a 32768 cap at 50 credits/token
+# would make three Astra candidates exceed the per-prompt worst-case budget.
+MAX_OUTPUT_BY_MODEL = {ASTRA: 16384}
+
+
+def max_output(model: str) -> int:
+    return MAX_OUTPUT_BY_MODEL.get(model, MAX_OUTPUT)
 JUDGE_OUTPUT = 2048
 
 STRATEGIES = {
@@ -227,7 +234,7 @@ def candidate(
                 ),
             }
         )
-    planned = _plan(model, content, INSTRUCTIONS, MAX_OUTPUT)
+    planned = _plan(model, content, INSTRUCTIONS, max_output(model))
     try:
         result = calls.create(
             request_id=position,
@@ -235,7 +242,7 @@ def candidate(
             store=False,
             service_tier="default",
             reasoning={"effort": "medium"},
-            max_output_tokens=MAX_OUTPUT,
+            max_output_tokens=max_output(model),
             instructions=INSTRUCTIONS,
             input=cast(ResponseInputParam, [{"role": "user", "content": content}]),
         )
@@ -256,7 +263,7 @@ def candidate(
 
 
 def candidate_plan(model: str, image_count: int, extra_chars: int = 0) -> Planned:
-    return Planned(model, len(INSTRUCTIONS) + 400 + extra_chars, image_count, MAX_OUTPUT)
+    return Planned(model, len(INSTRUCTIONS) + 400 + extra_chars, image_count, max_output(model))
 
 
 def render_candidates(
