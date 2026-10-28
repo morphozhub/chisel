@@ -153,22 +153,39 @@ class Witness(WitnessClient):
         # request_id -> HTTP status returned once through the capture boundary (never cached)
         self.provider_status: dict[int, int] = {}
 
-    def renderer_transport(self) -> httpx.BaseTransport:
-        def submit(request: httpx.Request) -> httpx.Response:
-            if request.url.path == "/v1/artifacts/context":
-                return httpx.Response(200, json={"submission_commit": "c" * 40})
-            value = json.loads(request.content)
-            source = value["source"]
-            with self.lock:
-                self.submissions[value["generation"]["prompt_sha256"]] = source
-            return httpx.Response(200, json={"submission": {
-                "js": None if source is None else "saved.js",
-                "views": None if source is None else "saved",
-                "failure_reason": "generation_failed" if source is None else None,
-                "size": 0 if source is None else len(source.encode()),
-            }})
+        self.prompt_ids: dict[str, str] = {}  # sha256 -> official prompt ID (Pod's frozen mapping)
+        self.lose_submit_reply_once = False
+        self.submits = 0
 
-        return httpx.MockTransport(submit)
+    def saved_response(self, exchange_id: str) -> CapturedResponse:
+        return next(value for value in self.recorded.values() if value.exchange_id == exchange_id)
+
+    def submit(self, image: bytes, source: str | None) -> dict[str, object]:
+        digest = hashlib.sha256(image).hexdigest()
+        with self.lock:
+            self.submits += 1
+            self.submissions[digest] = source
+            if self.lose_submit_reply_once:
+                self.lose_submit_reply_once = False
+                raise WitnessError("Final submission transport failed", source="gateway", code="submission_unresolved")
+        return {
+            "js": None if source is None else "saved.js",
+            "views": None if source is None else "saved",
+            "failure_reason": "generation_failed" if source is None else None,
+            "size": 0 if source is None else len(source.encode()),
+        }
+
+    def get_submitted(self) -> dict[str, dict[str, object]]:
+        with self.lock:
+            return {
+                self.prompt_ids.get(digest, digest): {
+                    "js": None if source is None else "saved.js",
+                    "views": None if source is None else "saved",
+                    "failure_reason": "generation_failed" if source is None else None,
+                    "size": 0 if source is None else len(source.encode()),
+                }
+                for digest, source in self.submissions.items()
+            }
 
     def _capture(self, key: RequestKey, body: bytes, session_id: str | None) -> CapturedResponse:
         with self.lock:
@@ -186,19 +203,16 @@ class Witness(WitnessClient):
                     barrier.wait(timeout=5)
                 params = json.loads(body)
                 identifier = str(uuid.uuid4())
-                (self._state / identifier).mkdir(mode=0o700)
                 with self.lock:
                     status = self.provider_status.pop(key.request_id, None)
                 if status is not None:
                     error = {"error": {"message": f"fixture HTTP {status}", "type": "fixture", "code": "fixture"}}
                     captured = CapturedResponse(identifier, status, json.dumps(error).encode())
-                    self._save_response(captured)
                     return captured
                 response = self.calls.create(request_id=key.request_id, **params)
                 captured = CapturedResponse(identifier, 200, b"data: " + json.dumps({
                     "type": "response." + response.status, "response": response.model_dump(),
                 }).encode() + b"\n\n")
-                self._save_response(captured)
                 with self.lock:
                     self.recorded[key.id] = captured
                     if self.lose_reply_once:
@@ -462,3 +476,36 @@ def test_check_command_validates_frozen_inputs_without_loading_credentials(
     assert checked["maximum_workflow_calls"] == 48
     assert checked["maximum_candidate_renders"] == 40
     assert not (tmp_path / "run").exists()
+
+
+def test_lost_submit_reply_is_resent_from_the_final_checkpoint_without_regenerating(
+    tmp_path: Path, prompts: list[Prompt]
+) -> None:
+    witness, renderer = Witness(), Renderer()
+    witness.lose_submit_reply_once = True
+    config = settings(tmp_path, parallel_prompts=1, parallel_calls=1)
+    first = run_batch(prompts[:1], config, witness, renderer, progress=lambda _: None)
+    assert first == {"0": "pending"} and witness.paid == 7 and witness.submits == 1
+    final = json.loads((config.output / "0" / "final.json").read_bytes())
+    assert final["submission"] is None and final["output"] is not None
+    # The Pod kept the (possibly) saved result; the next pass neither re-generates nor re-renders.
+    assert run_batch(prompts[:1], config, witness, renderer, progress=lambda _: None) == {"0": "selected"}
+    assert witness.paid == 7 and len(renderer.sources) == 5
+    final = json.loads((config.output / "0" / "final.json").read_bytes())
+    assert final["submission"]["js"] == "saved.js"
+    assert witness.submissions == {prompts[0].sha256: (config.output / "0" / "selected.js").read_text()}
+
+
+def test_resume_skips_prompts_the_pod_already_holds_including_saved_none(
+    tmp_path: Path, prompts: list[Prompt]
+) -> None:
+    witness, renderer = Witness(), Renderer()
+    witness.prompt_ids = {p.sha256: p.id for p in prompts}
+    witness.submissions = {prompts[0].sha256: "export default function generate(THREE) { return new THREE.Group(); }",
+                           prompts[1].sha256: None}
+    config = settings(tmp_path, parallel_prompts=2, parallel_calls=2)
+    assert run_batch(prompts, config, witness, renderer, progress=lambda _: None) == {
+        "0": "selected", "1": "failed", "2": "selected", "3": "selected",
+    }
+    assert witness.paid == 14 and witness.submits == 2 and len(renderer.sources) == 10
+    assert not (config.output / "0").exists() and not (config.output / "1").exists()

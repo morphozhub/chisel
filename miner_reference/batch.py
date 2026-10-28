@@ -22,7 +22,7 @@ from miner_runtime.runner import run_generation
 from openai import APIError
 from openai.types.responses import Response
 from openai.types.responses.response_create_params import ResponseCreateParamsBase
-from renderer_client import ArtifactClient, Renderer, RendererClient
+from renderer_client import Renderer, RendererClient
 from witness_client import WitnessClient, WitnessConfig, WitnessError
 from witness_client.calls import canonical
 from witness_client.state import save
@@ -30,7 +30,6 @@ from witness_client.state import save
 from . import images, pipeline
 from .pipeline import ModelCalls
 from .renders import SavedRenderer
-from .submissions import run_and_save
 
 
 @dataclass(frozen=True)
@@ -65,7 +64,7 @@ class BatchSettings:
     parallel_prompts: int = 4
     parallel_calls: int = 2
     parallel_renders: int = 1
-    final_save: bool = True  # dev-only: False skips the Pod final-save (test deployments without artifact storage)
+    final_save: bool = True  # dev-only: False skips witness.submit() (deployments without result storage)
 
     def __post_init__(self) -> None:
         if not all(1 <= n <= 32 for n in (self.parallel_prompts, self.parallel_calls, self.parallel_renders)):
@@ -197,29 +196,32 @@ def run_batch(
                 )
                 return pipeline.run(image, seed, calls, renderer)
 
-            if not settings.final_save:
-                # Dev-only path for test deployments without artifact storage: generate through the
-                # witness, keep every checkpoint, but do not deliver a final choice to the Pod.
-                source = run_generation(execute, image, settings.seed, witness, previews)
-                save(directory / "final.json", canonical({"dev_no_final_save": True, "output": source,
-                                                            "sha256": None if source is None else hashlib.sha256(source.encode()).hexdigest()}))
+            # Private checkpoint of generate()'s return before network delivery: a lost submit
+            # reply is re-sent from the file without calling generate() again.
+            final_checkpoint = directory / "final.json"
+            if final_checkpoint.exists():
+                saved = json.loads(final_checkpoint.read_bytes())
+                if saved.get("execution_id") != inputs.id:
+                    raise ValueError("Final checkpoint identity differs")
+                source = saved["output"]
+                if saved["sha256"] != (None if source is None else hashlib.sha256(source.encode()).hexdigest()):
+                    raise ValueError("Final checkpoint bytes changed")
             else:
-                with ArtifactClient(
-                    "https://witness.internal",
-                    renderer_id=renderer.renderer_id,
-                    prompt_sha256=prompt.sha256,
-                    prompt_image=image,
-                    seed=settings.seed,
-                    transport=witness.renderer_transport(),
-                    timeout=240,
-                ) as submissions:
-                    final_checkpoint = directory / "final.json"
-                    run_and_save(
-                        lambda: run_generation(execute, image, settings.seed, witness, previews),
-                        submissions,
-                        final_checkpoint,
-                    )
-                    source = json.loads(final_checkpoint.read_bytes())["output"]
+                source = run_generation(execute, image, settings.seed, witness, previews)
+                saved = {
+                    "execution_id": inputs.id,
+                    "output": source,
+                    "sha256": None if source is None else hashlib.sha256(source.encode()).hexdigest(),
+                    "submission": None,
+                }
+                save(final_checkpoint, canonical(saved))
+            if settings.final_save and saved.get("submission") is None:
+                # Submission belongs to the live runner, outside generate() (witness-client >= 0.2.13rc8).
+                submission = witness.submit(image, source)
+                saved = {**saved, "submission": submission}
+                save(final_checkpoint, canonical(saved))
+                notify(f"{prompt.id} | submitted: js={submission.get('js') is not None} "
+                       f"views={submission.get('views') is not None} failure={submission.get('failure_reason')}")
         except Exception as error:
             code = error.code if isinstance(error, WitnessError) else type(error).__name__
             save(checkpoint, canonical({"execution_id": inputs.id, "status": "pending", "error": code}))
@@ -250,8 +252,24 @@ def run_batch(
             raise ValueError("Batch identity changed; preserve its original inputs and configuration")
         save(run_file, identity)
         results: dict[str, str] = {}
+        # Resume by membership: prompts already saved on the assigned Pod (official prompt ID =
+        # frozen file stem) are not generated again, including a saved `None` result.
+        submitted: dict[str, dict[str, object]] = {}
+        if settings.final_save:
+            try:
+                submitted = witness.get_submitted()
+            except WitnessError as error:
+                notify(f"submitted-result lookup failed ({error.code}); resuming from local checkpoints only")
+            else:
+                notify(f"pod reports {len(submitted)} submitted prompt(s)")
+        for prompt in prompts:
+            saved = submitted.get(prompt.id)
+            if saved is not None:
+                results[prompt.id] = "selected" if saved.get("js") is not None else "failed"
+                notify(f"{prompt.id} | already submitted: {results[prompt.id]}")
+        todo = [prompt for prompt in prompts if prompt.id not in results]
         with ThreadPoolExecutor(max_workers=settings.parallel_prompts, thread_name_prefix="miner-prompt") as pool:
-            jobs = {pool.submit(generate, prompt): prompt for prompt in prompts}
+            jobs = {pool.submit(generate, prompt): prompt for prompt in todo}
             for future in as_completed(jobs):
                 prompt = jobs[future]
                 try:
@@ -285,7 +303,7 @@ def main() -> None:
     parser.add_argument("--max-calls-per-5h", type=int, default=None,
                         help="Pace model dispatches to at most N per 5 hours (subscription quota guard)")
     parser.add_argument("--no-final-save", action="store_true",
-                        help="DEV ONLY: skip the Pod final-save (test deployments report artifact_storage_disabled)")
+                        help="DEV ONLY: skip witness.submit() of the final result (deployments without result storage)")
     args = parser.parse_args()
     manifest = json.loads(args.manifest.read_bytes())
     prompts = [Prompt(row["id"], Path(row["path"]), row["sha256"]) for row in manifest["prompts"]]
